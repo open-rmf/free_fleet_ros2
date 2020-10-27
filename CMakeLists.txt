@@ -69,16 +69,17 @@ endforeach()
 # ------------------------------------------------------------------------------
 
 add_executable(full_control_adapter
+  "src/rmf_adapter/load_param.cpp"
   "src/rmf_adapter/full_control.cpp"
 )
 
 target_link_libraries(full_control_adapter
   PRIVATE
-    # free_fleet_ros2
     ${rclcpp_LIBRARIES}
     rmf_utils::rmf_utils
     rmf_traffic::rmf_traffic
-    ${rmf_fleet_adapter_LIBRARIES}
+    rmf_traffic_ros2::rmf_traffic_ros2
+    rmf_fleet_adapter::rmf_fleet_adapter
     free_fleet::free_fleet
     free_fleet_cyclonedds::free_fleet_cyclonedds
 )
@@ -86,7 +87,6 @@ target_link_libraries(full_control_adapter
 target_include_directories(full_control_adapter
   PRIVATE
     ${rclcpp_INCLUDE_DIRS}
-    ${rmf_fleet_adapter_INCLUDE_DIRS}
 )
 
 # ------------------------------------------------------------------------------

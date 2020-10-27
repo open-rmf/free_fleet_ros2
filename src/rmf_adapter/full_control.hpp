@@ -34,9 +34,14 @@ class FullControlHandle : public rmf_fleet_adapter::agv::RobotCommandHandle
 public:
 
   using SharedPtr = std::shared_ptr<FullControlHandle>;
-
-  static SharedPtr make(
-    std::shared_ptr<free_fleet::transport::Middleware> middleware);
+  
+  FullControlHandle(
+    rclcpp::Node& node,
+    std::string fleet_name,
+    std::string robot_name,
+    std::shared_ptr<const rmf_traffic::agv::Graph> graph,
+    std::shared_ptr<const rmf_traffic::agv::VehicleTraits> traits,
+    std::shared_ptr<free_fleet::transport::Middleware> free_fleet_middleware);
 
   ~FullControlHandle();
 
@@ -51,9 +56,10 @@ public:
     const std::string& dock_name,
     RequestCompleted docking_finished_callback) final;
 
+  void set_updater(rmf_fleet_adapter::agv::RobotUpdateHandlePtr updater);
+
   class Implementation;
 private:
-  FullControlHandle();
   rmf_utils::impl_ptr<Implementation> _pimpl;
 };
 
