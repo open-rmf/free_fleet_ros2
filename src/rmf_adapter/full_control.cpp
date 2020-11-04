@@ -60,49 +60,6 @@ public:
   std::string _robot_name;
 
   uint32_t _current_task_id = 0;
-
-  std::mutex _mutex;
-  std::thread _thread;
-
-  Implementation()
-  {}
-
-  Implementation(const Implementation&)
-  {}
-
-  ~Implementation()
-  {
-    if (_thread.joinable())
-      _thread.join();
-  }
-
-  void _loop()
-  {
-    while (_updater && _free_fleet_middleware)
-    {
-      // get state from free_fleet_middleware
-      auto incoming_states = _free_fleet_middleware->read_states();
-
-      // update using the updater
-      for (const auto& rs : incoming_states)
-      {
-        if (!rs)
-          continue;
-      }
-
-      // perform the current request lambda. This is for making sure the robot
-      // executes the request, since most of the request functions are just
-      // sending one single message.
-    }
-  }
-
-  void _start()
-  {
-    RCLCPP_INFO(
-      _node->get_logger(),
-      "Starting Free Fleet full control handle.");
-    _thread = std::thread(std::bind(&Implementation::_loop, this));
-  }
 };
 
 //==============================================================================
@@ -156,7 +113,16 @@ void FullControlHandle::set_updater(
   rmf_fleet_adapter::agv::RobotUpdateHandlePtr updater)
 {
   _pimpl->_updater = std::move(updater);
-  _pimpl->_start();
+  // _pimpl->_start();
+}
+
+//==============================================================================
+void FullControlHandle::update_state(const messages::RobotState& new_state)
+{
+  if (!_pimpl->_updater)
+    return;
+
+  
 }
 
 //==============================================================================
@@ -183,6 +149,9 @@ struct Connections : public std::enable_shared_from_this<Connections>
 
   /// Middleware for free fleet
   std::shared_ptr<free_fleet::transport::Middleware> free_fleet_middleware;
+
+  /// Timer that polls for all the incoming states
+  std::shared_ptr<rclcpp::TimerBase> timer;
   
   std::mutex mutex;
 
@@ -304,6 +273,36 @@ std::shared_ptr<Connections> make_fleet(
   connections->free_fleet_middleware =
     free_fleet::cyclonedds::CycloneDDSMiddleware::make_server(
       dds_domain, fleet_name);
+
+  connections->timer =
+   node->create_wall_timer(
+     std::chrono::milliseconds(100),
+     [c = std::weak_ptr<Connections>(connections), fleet_name]()
+  {
+    const auto connections = c.lock();
+    if (!connections)
+      return;
+
+    auto new_states = connections->free_fleet_middleware->read_states();
+    for (const auto s : new_states)
+    {
+      if (s)
+      {
+        const auto insertion = connections->robots.insert({state.name, nullptr});
+        const bool new_robot = insertion.second;
+        if (new_robot)
+        {
+          connections->add_robot(fleet_name, *s);
+        }
+
+        const auto& command = insertion.first->second;
+        if (command)
+        {
+          command->update_state(*s);
+        }
+      }
+    }
+  }); 
 
   return connections;
 }

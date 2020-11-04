@@ -58,6 +58,8 @@ public:
 
   void set_updater(rmf_fleet_adapter::agv::RobotUpdateHandlePtr updater);
 
+  void update_state(const messages::RobotState& new_state);
+
   class Implementation;
 private:
   rmf_utils::impl_ptr<Implementation> _pimpl;
