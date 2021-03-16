@@ -48,7 +48,6 @@ public:
     auto fleet_state_pub = 
       node->create_publisher<rmf_fleet_msgs::msg::FleetState>(
         fleet_state_topic, 10);
-
     node->fleet_state_pub = std::move(fleet_state_pub);
 
     free_fleet::Manager::TimeNow time_now_fn =
@@ -56,7 +55,7 @@ public:
     free_fleet::Manager::RobotUpdatedCallback cb =
       [node](const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
     {
-      node->update_robots(robot);
+      node->update_robot(std::move(robot));
     };
 
     auto manager = free_fleet::Manager::make(
@@ -84,16 +83,17 @@ public:
   {
     manager->start(freq);
 
-    auto timer_callback = [this]() -> void
+    auto timer_callback = [&]() -> void
     {
-      std::lock_guard<std::mutex> lock(this->mutex);
+      std::lock_guard<std::mutex> lock(mutex);
       rmf_fleet_msgs::msg::FleetState fs;
-      fs.name = this->fleet_name;
-      for (const auto it : this->robots)
+      fs.name = fleet_name;
+      for (const auto it : robots)
       {
         fs.robots.push_back(it.second);
       }
-      this->fleet_state_pub->publish(fs);
+      // std::cout << "Before pub" << std::endl;
+      fleet_state_pub->publish(fs);
     };
     using namespace std::chrono_literals;
     timer = create_wall_timer(500ms, timer_callback);
@@ -113,8 +113,11 @@ private:
 
   rclcpp::TimerBase::SharedPtr timer;
 
-  void update_robots(const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
+  void update_robot(const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
   {
+    if (!robot)
+      return;
+    
     std::lock_guard<std::mutex> lock(mutex);
     rmf_fleet_msgs::msg::RobotState state;
     state.name = robot->name();
@@ -128,7 +131,7 @@ private:
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-  std::string fleet_name = "test_fleet";
+  std::string fleet_name = "turtlebot3";
   std::shared_ptr<rmf_traffic::agv::Graph> graph(new rmf_traffic::agv::Graph);
   auto m =
     free_fleet::cyclonedds::CycloneDDSMiddleware::make_server(24, fleet_name);
