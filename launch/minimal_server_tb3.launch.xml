@@ -1,0 +1,20 @@
+<?xml version='1.0' ?>
+<launch>
+
+  <node pkg="free_fleet_ros2"
+      exec="minimal_server"
+      name="minimal_server"
+      output="both">
+
+    <param name="fleet_name" value="turtlebot3"/>
+    <param name="domain_id" value="24"/>
+    <param name="fleet_state_topic" value="fleet_states"/>
+    <param name="update_frequency" value="10"/>
+    <param name="translation_x" value="0.0"/>
+    <param name="translation_y" value="0.0"/>
+    <param name="rotation" value="0.0"/>
+    <param name="scale" value="1.0"/>
+
+  </node>
+
+</launch>

@@ -37,21 +37,62 @@ public:
 
   using SharedPtr = std::shared_ptr<MinimalServer>;
 
-  static SharedPtr make(
-    const std::string& fleet_name,
-    std::shared_ptr<rmf_traffic::agv::Graph> graph,
-    std::shared_ptr<free_fleet::transport::Middleware> middleware,
-    std::shared_ptr<free_fleet::CoordinateTransformer> to_robot_transform,
-    const std::string& fleet_state_topic)
+  static SharedPtr make()
   {
     std::shared_ptr<MinimalServer> node(new MinimalServer());
-    auto fleet_state_pub = 
-      node->create_publisher<rmf_fleet_msgs::msg::FleetState>(
-        fleet_state_topic, 10);
-    node->fleet_state_pub = std::move(fleet_state_pub);
+
+    std::string fleet_name = "fleet_name";
+    int domain_id = -1;
+    std::string fleet_state_topic = "fleet_state_topic";
+    int update_frequency = 10;
+
+    double scale = 1.0;
+    double translation_x = 0.0;
+    double translation_y = 0.0;
+    double rotation_yaw = 0.0;
+
+    auto start_time = std::chrono::steady_clock::now();
+    auto end_time = std::chrono::steady_clock::now();
+    while (
+      std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time)
+        .count() < 10 &&
+      domain_id < 0)
+    {
+      rclcpp::spin_some(node);
+      node->get_parameter("fleet_name", fleet_name);
+      node->get_parameter("domain_id", domain_id);
+      node->get_parameter("fleet_state_topic", fleet_state_topic);
+      node->get_parameter("update_frequency", update_frequency);
+      node->get_parameter("scale", scale);
+      node->get_parameter("translation_x", translation_x);
+      node->get_parameter("translation_y", translation_y);
+      node->get_parameter("rotation_yaw", rotation_yaw);
+
+      end_time = std::chrono::steady_clock::now();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    if (domain_id < 0)
+    {
+      std::cout << "Jeepers, waiting for parameters timed out." << std::endl;
+      return nullptr;
+    }
+
+    std::shared_ptr<rmf_traffic::agv::Graph> graph(new rmf_traffic::agv::Graph);
+
+    auto middleware =
+      free_fleet::cyclonedds::CycloneDDSMiddleware::make_server(
+        domain_id, fleet_name);
+
+    auto to_robot_transform =
+      free_fleet::CoordinateTransformer::make(
+        scale,
+        translation_x,
+        translation_y,
+        rotation_yaw);
 
     free_fleet::Manager::TimeNow time_now_fn =
       [](){ return std::chrono::steady_clock::now(); };
+
     free_fleet::Manager::RobotUpdatedCallback cb =
       [node](const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
     {
@@ -70,18 +111,27 @@ public:
       return nullptr;
     }
 
+    auto fleet_state_pub =
+      node->create_publisher<rmf_fleet_msgs::msg::FleetState>(
+        fleet_state_topic, 10);
+    node->fleet_state_pub = std::move(fleet_state_pub);
     node->fleet_name = fleet_name;
     node->manager = std::move(manager);
+    node->update_frequency = update_frequency;
     return node;
   }
 
   MinimalServer()
-  : Node("minimal_server_node")
+  : Node(
+      "minimal_server_node",
+      rclcpp::NodeOptions()
+        .allow_undeclared_parameters(true)
+        .automatically_declare_parameters_from_overrides(true))
   {}
 
-  void start(uint32_t freq)
+  void start()
   {
-    manager->start(freq);
+    manager->start(update_frequency);
 
     auto timer_callback = [&]() -> void
     {
@@ -113,6 +163,8 @@ private:
 
   rclcpp::TimerBase::SharedPtr timer;
 
+  int update_frequency = 10;
+
   void update_robot(const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
   {
     if (!robot)
@@ -131,26 +183,17 @@ private:
 int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
-  std::string fleet_name = "turtlebot3";
-  std::shared_ptr<rmf_traffic::agv::Graph> graph(new rmf_traffic::agv::Graph);
-  auto m =
-    free_fleet::cyclonedds::CycloneDDSMiddleware::make_server(24, fleet_name);
-  auto t =
-    free_fleet::CoordinateTransformer::make(1.0, 0.0, 0.0, 0.0);
-  auto minimal_server = MinimalServer::make(
-    fleet_name,
-    graph,
-    m,
-    t,
-    "fleet_states");
+
+  auto minimal_server = MinimalServer::make();
 
   if (!minimal_server)
-    std::cout << "yikes something went wrong" << std::endl;
-  minimal_server->start(10);
+  {
+    std::cout << "Yikes something went wrong" << std::endl;
+    return 1;
+  }
 
+  minimal_server->start();
   rclcpp::spin(minimal_server);
-
-  std::cout << "All done" << std::endl;
   rclcpp::shutdown();
   return 0;
 }
