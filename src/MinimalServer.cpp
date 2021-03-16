@@ -18,6 +18,7 @@
 #include <iostream>
 #include <memory>
 #include <chrono>
+#include <mutex>
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/node_options.hpp>
@@ -53,9 +54,9 @@ public:
     free_fleet::Manager::TimeNow time_now_fn =
       [](){ return std::chrono::steady_clock::now(); };
     free_fleet::Manager::RobotUpdatedCallback cb =
-      [node](const std::shared_ptr<free_fleet::agv::RobotInfo>&)
+      [node](const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
     {
-      node->fleet_state_pub->publish(rmf_fleet_msgs::msg::FleetState());
+      node->update_robots(robot);
     };
 
     auto manager = free_fleet::Manager::make(
@@ -70,6 +71,7 @@ public:
       return nullptr;
     }
 
+    node->fleet_name = fleet_name;
     node->manager = std::move(manager);
     return node;
   }
@@ -81,15 +83,46 @@ public:
   void start(uint32_t freq)
   {
     manager->start(freq);
+
+    auto timer_callback = [this]() -> void
+    {
+      std::lock_guard<std::mutex> lock(this->mutex);
+      rmf_fleet_msgs::msg::FleetState fs;
+      fs.name = this->fleet_name;
+      for (const auto it : this->robots)
+      {
+        fs.robots.push_back(it.second);
+      }
+      this->fleet_state_pub->publish(fs);
+    };
+    using namespace std::chrono_literals;
+    timer = create_wall_timer(500ms, timer_callback);
   }
 
 private:
+
+  std::mutex mutex;
+
+  std::string fleet_name;
 
   free_fleet::Manager::SharedPtr manager;
 
   std::unordered_map<std::string, rmf_fleet_msgs::msg::RobotState> robots;
 
   rclcpp::Publisher<rmf_fleet_msgs::msg::FleetState>::SharedPtr fleet_state_pub;
+
+  rclcpp::TimerBase::SharedPtr timer;
+
+  void update_robots(const std::shared_ptr<free_fleet::agv::RobotInfo>& robot)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    rmf_fleet_msgs::msg::RobotState state;
+    state.name = robot->name();
+    state.location.x = robot->state().location.x;
+    state.location.y = robot->state().location.y;
+    state.location.yaw = robot->state().location.yaw;
+    robots[robot->name()] = state;
+  }
 };
 
 int main(int argc, char** argv)
