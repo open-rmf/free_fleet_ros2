@@ -1,0 +1,46 @@
+<?xml version='1.0' ?>
+
+<launch>
+
+  <node pkg="free_fleet_ros2_client"
+        exec="client"
+        name="ffr2_client_deliveryBot_1" 
+        output="both">
+
+    <param name="fleet_name" value="deliveryBot"/>
+    <param name="robot_model" value="slotcar_deliveryBot"/>
+    <param name="robot_name" value="deliveryBot_1"/>
+    <param name="dds_domain" value="0"/>
+  </node>
+  <node pkg="free_fleet_ros2_client"
+        exec="client"
+        name="ffr2_client_tinyBot1" 
+        output="both">
+
+    <param name="fleet_name" value="tinyBot"/>
+    <param name="robot_model" value="tinyBot"/>
+    <param name="robot_name" value="tinyBot_1"/>
+    <param name="dds_domain" value="0"/>
+  </node>
+  <node pkg="free_fleet_ros2_client"
+        exec="client"
+        name="ffr2_client_cleanerBotA_1" 
+        output="both">
+
+    <param name="fleet_name" value="cleanerBotA"/>
+    <param name="robot_model" value="cleanerBotA"/>
+    <param name="robot_name" value="cleanerBotA_1"/>
+    <param name="dds_domain" value="0"/>
+  </node>
+  <node pkg="free_fleet_ros2_client"
+        exec="client"
+        name="ffr2_client_cleanerBotA_2" 
+        output="both">
+
+    <param name="fleet_name" value="cleanerBotA"/>
+    <param name="robot_model" value="cleanerBotA"/>
+    <param name="robot_name" value="cleanerBotA_2"/>
+    <param name="dds_domain" value="0"/>
+  </node>
+
+</launch>

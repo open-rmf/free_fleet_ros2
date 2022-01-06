@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>free_fleet_ros2_examples</name>
+  <version>1.1.0</version>
+  <description>Free Fleet ROS 2 examples</description>
+  <maintainer email="aaron@openrobotics.org">Aaron</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+ 
+  <exec_depend>free_fleet_ros2_adapter</exec_depend>
+  <exec_depend>free_fleet_ros2_client</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
