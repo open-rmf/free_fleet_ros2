@@ -15,24 +15,32 @@
  *
  */
 
-#include "StateMonitor.hpp"
+#ifndef INCLUDE__FREE_FLEET_ROS2__CLIENT__STATEMONITOR_HPP
+#define INCLUDE__FREE_FLEET_ROS2__CLIENT__STATEMONITOR_HPP
+
+#include <memory>
+
+#include <rmf_utils/impl_ptr.hpp>
+#include <free_fleet/client/StateMonitor.hpp>
 
 namespace free_fleet_ros2 {
 
-std::shared_ptr<StateMonitor> StateMonitor::make()
+class StateMonitor : public free_fleet::StateMonitor
 {
-  return nullptr;
-}
+public:
 
-StateMonitor::StateMonitor()
-{
-}
+  static std::shared_ptr<StateMonitor> make();
 
-bool StateMonitor::current_state(
-  nlohmann::json& state,
-  std::string& error) const
-{
-  return false;
-}
+  bool current_state(
+    nlohmann::json& state,
+    std::string& error) const final;
+
+  class Implementation;
+private:
+  StateMonitor();
+  rmf_utils::unique_impl_ptr<Implementation> _pimpl;
+};
 
 } // namespace free_fleet_ros2
+
+#endif // INCLUDE__FREE_FLEET_ROS2__CLIENT__STATEMONITOR_HPP

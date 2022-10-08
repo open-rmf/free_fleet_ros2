@@ -18,16 +18,17 @@ include(GNUInstallDirs)
 find_package(ament_cmake REQUIRED)
 
 set(dep_pkgs
+  free_fleet
+  geometry_msgs
+  nav2_msgs
+  nav2_util
   rclcpp
   rclcpp_action
+  rmf_utils
+  sensor_msgs
+  std_srvs
   tf2
   tf2_ros
-  nav2_util
-  std_srvs
-  sensor_msgs
-  nav2_msgs
-  geometry_msgs
-  free_fleet
 )
 foreach(pkg ${dep_pkgs})
   find_package(${pkg} REQUIRED)
@@ -45,6 +46,12 @@ ament_target_dependencies(free_fleet_ros2
   ${dep_pkgs}
 )
 
+target_include_directories(free_fleet_ros2
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
 install(
   TARGETS
     free_fleet_ros2
@@ -56,9 +63,9 @@ install(
 #   DESTINATION share/${PROJECT_NAME}
 # )
 
-# install(
-#   DIRECTORY include/
-#   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-# )
+install(
+  DIRECTORY include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
 ament_package()
