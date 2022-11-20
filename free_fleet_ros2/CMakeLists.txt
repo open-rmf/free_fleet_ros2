@@ -19,6 +19,7 @@ find_package(ament_cmake REQUIRED)
 
 set(dep_pkgs
   free_fleet
+  free_fleet_mqtt
   geometry_msgs
   nav2_msgs
   nav2_util
@@ -52,9 +53,19 @@ target_include_directories(free_fleet_ros2
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+add_executable(client
+  src/client/main.cpp
+)
+
+target_link_libraries(client
+  PRIVATE
+    free_fleet_ros2
+)
+
 install(
   TARGETS
     free_fleet_ros2
+    client
   RUNTIME DESTINATION lib/free_fleet_ros2
 )
 

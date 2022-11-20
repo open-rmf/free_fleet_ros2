@@ -20,17 +20,27 @@
 
 #include <memory>
 
+#include <rclcpp/rclcpp.hpp>
+
 #include <rmf_utils/impl_ptr.hpp>
 #include <free_fleet/client/RobotHandler.hpp>
 
 namespace free_fleet_ros2 {
 
-class Nav2Handler : public free_fleet::RobotHandler
+class Nav2Handler : public free_fleet::RobotHandler,
+  public std::enable_shared_from_this<Nav2Handler>
 {
 public:
 
-  // TODO
-  static std::unique_ptr<Nav2Handler> make();
+  static std::shared_ptr<Nav2Handler> make(
+    rclcpp::Node::SharedPtr node,
+    const std::string& robot_name,
+    const std::string& map_frame,
+    const std::string& robot_frame,
+    const std::string& navigate_to_pose_server_name,
+    int update_period_millis=500,
+    int init_timeout_millis=10,
+    double transform_timeout_secs=0.1);
 
   bool current_state(
     nlohmann::json& state,
@@ -42,7 +52,7 @@ public:
     std::string& error) final;
 
   bool follow_new_path(
-    const std::vector<free_fleet::Location>& path,
+    const std::vector<free_fleet::Goal>& path,
     RequestCompleted path_finished_callback,
     std::string& error) final;
 
@@ -62,7 +72,7 @@ public:
   class Implementation;
 private:
   Nav2Handler();
-  rmf_utils::unique_impl_ptr<Implementation> _pimpl;
+  rmf_utils::impl_ptr<Implementation> _pimpl;
 };
 
 } // namespace free_fleet_ros2

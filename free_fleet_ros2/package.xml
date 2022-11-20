@@ -15,7 +15,7 @@
   <depend>rmf_fleet_adapter</depend>
 
   <depend>free_fleet</depend>
-  <depend>free_fleet_cyclonedds</depend>
+  <depend>free_fleet_mqtt</depend>
 
   <build_depend>eigen</build_depend>
 
