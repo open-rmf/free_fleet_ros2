@@ -1,5 +1,4 @@
-cmake_minimum_required(VERSION 3.5.0)
-
+cmake_minimum_required(VERSION 3.7.0)
 project(free_fleet_ros2)
 
 # Default to C++17
@@ -35,12 +34,8 @@ foreach(pkg ${dep_pkgs})
   find_package(${pkg} REQUIRED)
 endforeach()
 
-file(GLOB lib_srcs
-  "src/client/*.cpp"
-)
-
 add_library(free_fleet_ros2 SHARED
-  ${lib_srcs}
+  src/client/Nav2Handler.cpp
 )
 
 ament_target_dependencies(free_fleet_ros2

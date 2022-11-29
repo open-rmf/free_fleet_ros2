@@ -38,6 +38,7 @@ public:
     const std::string& map_frame,
     const std::string& robot_frame,
     const std::string& navigate_to_pose_server_name,
+    const std::string& starting_map_name,
     int update_period_millis=500,
     int init_timeout_millis=10,
     double transform_timeout_secs=0.1);

@@ -57,8 +57,6 @@ public:
   Implementation(const Implementation&)
   {}
 
-  // void init_subscriptions(int update_period_millis);
-
   rclcpp::Node::SharedPtr node;
   std::shared_ptr<tf2_ros::Buffer> tf2_buffer;
   std::shared_ptr<tf2_ros::TransformListener> tf2_listener;
@@ -70,11 +68,10 @@ public:
   Mutex update_mutex;
 
   std::string robot_name;
-  // "uninitialized", "offline", "shutdown", "idle", "charging", "working", "error"
   std::optional<std::string> task_id = std::nullopt;
   std::string map_name;
   std::optional<geometry_msgs::msg::PoseStamped> pose_stamped = std::nullopt;
-  std::optional<double> speed = 0.0;
+  std::optional<double> speed = std::nullopt;
   std::optional<sensor_msgs::msg::BatteryState> battery_state = std::nullopt;
 
   std::string battery_state_topic = "battery_state";
@@ -83,78 +80,13 @@ public:
   double transform_timeout_secs = 0.1;
 };
 
-// void Nav2Handler::Implementation::init_subscriptions(int update_period_millis)
-// {
-//   using BatteryState = sensor_msgs::msg::BatteryState;
-//   battery_state_sub = node->create_subscription<BatteryState>(
-//     battery_state_topic, rclcpp::SensorDataQoS(),
-//     [w = weak_from_this()](BatteryState::UniquePtr msg)
-//     {
-//       auto handler_impl = w.lock();
-//       if (!handler_impl)
-//       {
-//         fferr << "handler_impl is not available.\n";
-//         return;
-//       }
-
-//       WriteLock(handler_impl->update_mutex);
-//       handler_impl->battery_state = *msg;
-//     });
-
-//   update_timer = node->create_wall_timer(
-//     std::chrono::milliseconds(update_period_millis),
-//     [w = weak_from_this()]()
-//     {
-//       auto handler_impl = w.lock();
-//       if (!handler_impl)
-//       {
-//         fferr << "handler_impl is not available.\n";
-//         return;
-//       }
-
-//       geometry_msgs::msg::PoseStamped new_pose_stamped;
-//       if (!nav2_util::getCurrentPose(
-//         new_pose_stamped,
-//         *handler_impl->tf2_buffer,
-//         handler_impl->map_frame,
-//         handler_impl->robot_frame,
-//         handler_impl->transform_timeout_secs))
-//       {
-//         ffwarn << "unable to retrieve transform from ["
-//           << handler_impl->robot_frame << "] to ["
-//           << handler_impl->map_frame << "].\n";
-//         return;
-//       }
-
-//       double current_speed = 0;
-//       {
-//         ReadLock(handler_impl->update_mutex);
-//         double elapsed_sec =
-//           (rclcpp::Time(new_pose_stamped.header.stamp) -
-//           handler_impl->pose_stamped->header.stamp)
-//           .seconds();
-//         double distance = hypot(
-//           new_pose_stamped.pose.position.x -
-//           handler_impl->pose_stamped->pose.position.x,
-//           new_pose_stamped.pose.position.y -
-//           handler_impl->pose_stamped->pose.position.y,
-//           new_pose_stamped.pose.position.z -
-//           handler_impl->pose_stamped->pose.position.z);
-//         current_speed = abs(distance / elapsed_sec);
-//       }
-
-//       WriteLock(handler_impl->update_mutex);
-//       handler_impl->pose_stamped = std::move(new_pose_stamped);
-//       handler_impl->speed = current_speed;
-//     });
-// }
-
 std::shared_ptr<Nav2Handler> Nav2Handler::make(
   rclcpp::Node::SharedPtr node,
   const std::string& robot_name,
   const std::string& map_frame,
   const std::string& robot_frame,
   const std::string& navigate_to_pose_server_name,
+  const std::string& starting_map_name,
   int update_period_millis,
   int init_timeout_millis,
   double transform_timeout_secs)
@@ -266,6 +198,7 @@ std::shared_ptr<Nav2Handler> Nav2Handler::make(
     });
 
   handler->_pimpl->robot_name = robot_name;
+  handler->_pimpl->map_name = starting_map_name;
   handler->_pimpl->map_frame = map_frame;
   handler->_pimpl->robot_frame = robot_frame;
   handler->_pimpl->transform_timeout_secs = transform_timeout_secs;
@@ -287,23 +220,52 @@ bool Nav2Handler::current_state(
   nlohmann::json& state,
   std::string& error) const
 {
+  WriteLock(_pimpl->update_mutex);
+
   nlohmann::json new_state;
-  new_state["name"] = "test_robot";
-  new_state["status"] = "idle";
-  new_state["task_id"] = "";
-  new_state["unix_millis_time"] = 20;
-  new_state["battery"] = 1.0;
+  new_state["name"] = _pimpl->robot_name;
+
+  // TODO(aa): enum these values properly.
+  // TODO(aa): to handle error, offline, shutdown.
+  if (!_pimpl->battery_state.has_value() || !_pimpl->speed.has_value())
+  {
+    new_state["status"] = "uninitialized";
+  }
+  else if (_pimpl->battery_state.power_suppply_status ==
+    _pimpl->battery_state.POWER_SUPPLY_STATUS_CHARGING)
+  {
+    new_state["status"] = "charging";
+  }
+  else if (_pimpl->speed.value() < 1e-3)
+  {
+    new_state["status"] = "idle";
+  }
+  else
+  {
+    new_state["status"] = "moving";
+  }
+
+  new_state["task_id"] =
+    _pimpl->task_id.has_value() ? _pimpl->task_id.value() : "";
+  new_state["unix_millis_time"] =
+    _pimpl->new_pose_stamped.header.stamp.sec * 1000 +
+    static_cast<int>(_pimpl->new_pose_stamped.header.stamp.nanosec / 1000000);
+  new_state["battery"] = _pimpl->battery_state.percentage;
 
   nlohmann::json& location = new_state["location"];
-  location["map"] = "test_map";
-  location["x"] = 1.0;
-  location["y"] = 2.0;
-  location["yaw"] = 3.0;
+  location["map"] = _pimpl->map_name;
+  location["x"] = _pimpl->new_pose_stamped.pose.position.x;
+  location["y"] = _pimpl->new_pose_stamped.pose.position.y;
+  location["yaw"] =
+    tf2::impl::getYaw(
+      tf2::impl::toQuaternion(_pimpl->new_pose_stamped.pose.orientation));
 
   auto& issues = new_state["issues"];
+  issues = std::vector<nlohmann::json>();
+  // TODO(aa): populate issues during operation.
 
-  state = new_state;
-  error = "";
+  state = std::move(new_state);
+  error.clear();
   return true;
 }
 
