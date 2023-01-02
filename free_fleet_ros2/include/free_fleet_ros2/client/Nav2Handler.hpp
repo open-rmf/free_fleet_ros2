@@ -49,7 +49,6 @@ public:
 
   bool relocalize(
     const free_fleet::Location& new_location,
-    RequestCompleted relocalize_finished_callback,
     std::string& error) final;
 
   bool follow_new_path(
@@ -57,13 +56,9 @@ public:
     RequestCompleted path_finished_callback,
     std::string& error) final;
 
-  bool stop(
-    RequestCompleted stopped_callback,
-    std::string& error) final;
+  bool stop(std::string& error) final;
 
-  bool resume(
-    RequestCompleted resumed_callback,
-    std::string& error) final;
+  bool resume(std::string& error) final;
 
   bool custom_command(
     const nlohmann::json& details,

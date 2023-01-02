@@ -15,20 +15,24 @@
  *
  */
 
+#include <deque>
 #include <thread>
 #include <optional>
 #include <shared_mutex>
 
 #include <rclcpp/rclcpp.hpp>
+#include <tf2/impl/utils.h>
 #include <tf2_ros/buffer_interface.h>
 #include <tf2_ros/create_timer_ros.h>
 #include <tf2_ros/transform_listener.h>
-#include <tf2/impl/utils.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <sensor_msgs/msg/battery_state.hpp>
 
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <nav2_msgs/action/navigate_to_pose.hpp>
 
+#include <geometry_msgs/msg/quaternion.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 
 #include <nav2_util/robot_utils.hpp>
@@ -57,6 +61,26 @@ public:
   Implementation(const Implementation&)
   {}
 
+  geometry_msgs::msg::Quaternion quat_from_yaw(double yaw)
+  {
+    tf2::Quaternion quat_tf;
+    quat_tf.setRPY(0.0, 0.0, yaw);
+    quat_tf.normalize();
+
+    return tf2::toMsg(quat_tf);
+  }
+
+  NavigateToPose::Goal nav_goal_from_location(const free_fleet::Location loc)
+  {
+    NavigateToPose::Goal nav_goal;
+    nav_goal.pose.header.frame_id = map_frame;
+    nav_goal.pose.pose.position.x = loc.x;
+    nav_goal.pose.pose.position.y = loc.y;
+    nav_goal.pose.pose.position.z = 0.0;
+    nav_goal.pose.pose.orientation = quat_from_yaw(loc.yaw);
+    return nav_goal;
+  }
+
   rclcpp::Node::SharedPtr node;
   std::shared_ptr<tf2_ros::Buffer> tf2_buffer;
   std::shared_ptr<tf2_ros::TransformListener> tf2_listener;
@@ -65,7 +89,10 @@ public:
   rclcpp_action::Client<NavigateToPose>::SharedPtr navigate_to_pose_client;
   std::shared_ptr<rclcpp::TimerBase> update_timer;
 
-  Mutex update_mutex;
+  rclcpp::CallbackGroup::SharedPtr callback_group;
+  rclcpp::executors::SingleThreadedExecutor callback_group_executor;
+
+  mutable Mutex update_mutex;
 
   std::string robot_name;
   std::optional<std::string> task_id = std::nullopt;
@@ -78,6 +105,19 @@ public:
   std::string map_frame = "map";
   std::string robot_frame = "baselink";
   double transform_timeout_secs = 0.1;
+
+  std::thread follow_new_path_thread;
+  Mutex follow_new_path_mutex;
+  struct NavGoal
+  {
+    std::string level_name;
+    NavigateToPose::Goal goal;
+    std::optional<double> speed_limit = std::nullopt;
+    bool sent = false;
+    uint32_t aborted_count = 0;
+  };
+  std::shared_ptr<std::deque<NavGoal>> goal_path;
+
 };
 
 std::shared_ptr<Nav2Handler> Nav2Handler::make(
@@ -208,6 +248,16 @@ std::shared_ptr<Nav2Handler> Nav2Handler::make(
   handler->_pimpl->navigate_to_pose_client = std::move(navigate_to_pose_client);
   handler->_pimpl->battery_state_sub = std::move(battery_state_sub);
   handler->_pimpl->update_timer = std::move(update_timer);
+  handler->_pimpl->goal_path =
+    std::make_shared<std::deque<Implementation::NavGoal>>();
+
+  handler->_pimpl->callback_group =
+    handler->_pimpl->node->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive,
+      false);
+  handler->_pimpl->callback_group_executor.add_callback_group(
+    handler->_pimpl->callback_group,
+    handler->_pimpl->node->get_node_base_interface());
   return handler;
 }
 
@@ -220,19 +270,37 @@ bool Nav2Handler::current_state(
   nlohmann::json& state,
   std::string& error) const
 {
-  WriteLock(_pimpl->update_mutex);
+  ReadLock(_pimpl->update_mutex);
 
   nlohmann::json new_state;
   new_state["name"] = _pimpl->robot_name;
 
+  auto& issues = new_state["issues"];
+  issues = std::vector<nlohmann::json>();
+  // TODO(aa): populate issues during operation.
+
   // TODO(aa): enum these values properly.
   // TODO(aa): to handle error, offline, shutdown.
-  if (!_pimpl->battery_state.has_value() || !_pimpl->speed.has_value())
+  if (!_pimpl->battery_state.has_value())
   {
     new_state["status"] = "uninitialized";
+
+    nlohmann::json issue_msg;
+    issue_msg["category"] = "initialization";
+    issue_msg["detail"] = "battery status not found.";
+    issues.push_back(std::move(issue_msg));
   }
-  else if (_pimpl->battery_state.power_suppply_status ==
-    _pimpl->battery_state.POWER_SUPPLY_STATUS_CHARGING)
+  else if (!_pimpl->speed.has_value())
+  {
+    new_state["status"] = "uninitialized";
+
+    nlohmann::json issue_msg;
+    issue_msg["category"] = "initialization";
+    issue_msg["detail"] = "robot speed not initialized.";
+    issues.push_back(std::move(issue_msg));
+  }
+  else if (_pimpl->battery_state->power_supply_status ==
+    _pimpl->battery_state->POWER_SUPPLY_STATUS_CHARGING)
   {
     new_state["status"] = "charging";
   }
@@ -248,21 +316,21 @@ bool Nav2Handler::current_state(
   new_state["task_id"] =
     _pimpl->task_id.has_value() ? _pimpl->task_id.value() : "";
   new_state["unix_millis_time"] =
-    _pimpl->new_pose_stamped.header.stamp.sec * 1000 +
-    static_cast<int>(_pimpl->new_pose_stamped.header.stamp.nanosec / 1000000);
-  new_state["battery"] = _pimpl->battery_state.percentage;
+    _pimpl->pose_stamped->header.stamp.sec * 1000 +
+    static_cast<int>(_pimpl->pose_stamped->header.stamp.nanosec / 1000000);
+
+  if (_pimpl->battery_state.has_value())
+  {
+    new_state["battery"] = _pimpl->battery_state->percentage;
+  }
 
   nlohmann::json& location = new_state["location"];
   location["map"] = _pimpl->map_name;
-  location["x"] = _pimpl->new_pose_stamped.pose.position.x;
-  location["y"] = _pimpl->new_pose_stamped.pose.position.y;
+  location["x"] = _pimpl->pose_stamped->pose.position.x;
+  location["y"] = _pimpl->pose_stamped->pose.position.y;
   location["yaw"] =
     tf2::impl::getYaw(
-      tf2::impl::toQuaternion(_pimpl->new_pose_stamped.pose.orientation));
-
-  auto& issues = new_state["issues"];
-  issues = std::vector<nlohmann::json>();
-  // TODO(aa): populate issues during operation.
+      tf2::impl::toQuaternion(_pimpl->pose_stamped->pose.orientation));
 
   state = std::move(new_state);
   error.clear();
@@ -271,7 +339,6 @@ bool Nav2Handler::current_state(
 
 bool Nav2Handler::relocalize(
   const free_fleet::Location& new_location,
-  RequestCompleted relocalize_finished_callback,
   std::string& error)
 {
   return false;
@@ -282,19 +349,87 @@ bool Nav2Handler::follow_new_path(
   RequestCompleted path_finished_callback,
   std::string& error)
 {
+  // TODO: sanity check, first waypoint must be within N meters of our current
+  // position. Otherwise, ignore the request.
+
+  // check if we are currently doing any navigation
+  // if so cancel all
+  {
+    WriteLock(_pimpl->follow_new_path_mutex);
+    if (!_pimpl->goal_path->empty())
+    {
+      auto cancel_future =
+        _pimpl->navigate_to_pose_client->async_cancel_all_goals();
+      _pimpl->callback_group_executor.spin_until_future_complete(cancel_future);
+      // for result callback processing
+      _pimpl->callback_group_executor.spin_some();
+
+      _pimpl->goal_path->clear();
+    }
+
+    // convert new path to goals
+    for (const auto& goal : path)
+    {
+      _pimpl->goal_path->push_back(
+        Implementation::NavGoal {
+          goal.location.map_name,
+          _pimpl->nav_goal_from_location(goal.location),
+          goal.speed_limit,
+          false,
+          0});
+    }
+  }
+
+  // start navigation
+
+
+  // handle all this by spinning up another thread
+  // auto send_goal_options =
+  //   rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
+  // send_goal_options.goal_response_callback =
+  //   [](std::shared_future<GoalHandleNavigateToPose::SharedPtr> future)
+  //   {
+  //     auto goal_handle = future.get();
+  //     if (!goal_handle)
+  //     {
+  //       fferr << "Goal was rejected by server.\n";
+  //     }
+  //     else
+  //     {
+  //       ffinfo << "Goal accepted by server, waiting for result\n";
+  //     }
+  //   };
+  // send_goal_options.feedback_callback =
+  //   [](GoalHandleNavigateToPose::SharedPtr,
+  //   const std::shared_ptr<const NavigateToPose::Feedback> feedback)
+  //   {
+  //     ffinfo << "distace remaining: " << feedback->distance_remaining << "\n";
+  //   };
+  // send_goal_options.result_callback =
+  //   [](const GoalHandleNavigateToPose::WrappedResult & result) {
+  //     switch(result.code)
+  //     {
+  //       case rclcpp_action::ResultCode::SUCCEEDED:
+  //         return;
+  //       case rclcpp_action::ResultCode::ABORTED:
+  //         return;
+  //       case rclcpp_action::ResultCode::CANCELED:
+  //         return;
+  //       default:
+  //         return;
+  //     }
+  //   };
+
+
   return false;
 }
 
-bool Nav2Handler::stop(
-  RequestCompleted stopped_callback,
-  std::string& error)
+bool Nav2Handler::stop(std::string& error)
 {
   return false;
 }
 
-bool Nav2Handler::resume(
-  RequestCompleted resumed_callback,
-  std::string& error)
+bool Nav2Handler::resume(std::string& error)
 {
   return false;
 }
@@ -304,6 +439,7 @@ bool Nav2Handler::custom_command(
   RequestCompleted custom_command_finished_callback,
   std::string& error)
 {
+  error = "No custom command supported.";
   return false;
 }
 

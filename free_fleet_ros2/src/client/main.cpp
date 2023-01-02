@@ -34,7 +34,8 @@ int main(int argc, char** argv)
       "test_robot",
       "map",
       "base_footprint",
-      "navigate_to_pose");
+      "navigate_to_pose",
+      "L1");
   auto middleware = free_fleet::transport::MqttMiddleware::make(
     "tcp://localhost:1883",
     "test_free_fleet_mqtt__make_MqttMiddleware");
